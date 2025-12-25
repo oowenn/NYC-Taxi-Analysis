@@ -43,13 +43,18 @@ ollama pull llama3
 ```
 
 3. **Prepare data:**
-```bash
-# Place your Parquet files in data/ directory:
-# - fhvhv_tripdata_2023-*.parquet
-# - taxi_zone_lookup.csv
-# - fhv_base_lookup.csv
-# - hvfhs_license_num_lookup.csv
-```
+   
+   **Download trip data from NYC TLC:**
+   - Download `fhvhv_tripdata_2023-*.parquet` files from the [NYC TLC Trip Record Data page](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page)
+   - Look for "High Volume For-Hire Vehicle Trip Records" under the 2023 section
+   - Place the downloaded Parquet files in the `data/` directory
+   
+   **Lookup files:**
+   - `taxi_zone_lookup.csv` - Available from the NYC TLC website (Taxi Zone Lookup Table), but also included in `data/`
+   - `fhv_base_lookup.csv` - Created for this project, included in `data/`
+   - `hvfhs_license_num_lookup.csv` - Created for this project, included in `data/`
+   
+   All lookup files should be placed in the `data/` directory.
 
 ### Running Tests
 
