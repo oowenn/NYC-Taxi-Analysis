@@ -41,23 +41,8 @@ backend-dev:
 frontend-dev:
 	cd frontend && npm run dev
 
-build-backend:
-	cd backend && docker build -t nyc-chatbot-backend .
-
 build-frontend:
 	cd frontend && npm run build
-
-docker-build:
-	docker-compose build
-
-docker-up:
-	docker-compose up -d
-
-docker-down:
-	docker-compose down
-
-docker-logs:
-	docker-compose logs -f
 
 test:
 	cd backend && source venv/bin/activate && pytest

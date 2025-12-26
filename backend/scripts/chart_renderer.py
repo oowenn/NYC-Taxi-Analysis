@@ -61,18 +61,46 @@ def render_chart_from_spec(df: pd.DataFrame, spec: Dict[str, Any], output_path: 
     
     # Apply top_k filter if specified
     top_k = chart.get("top_k")
+    top_k_order = None  # Store the order for later sorting
     if top_k and top_k.get("col"):
         top_k_col = top_k.get("col")
         k = top_k.get("k", 10)
         by_col = top_k.get("by", y_col)
         order = top_k.get("order", "desc")
+        top_k_order = order  # Store for later
         
         if top_k_col in df.columns:
-            # Group by top_k_col and aggregate by_col
+            # Group by top_k_col and aggregate by_col to find top k
             grouped = df.groupby(top_k_col)[by_col].sum().reset_index()
             sorted_grouped = grouped.sort_values(by_col, ascending=(order == "asc"))
             top_values = sorted_grouped.head(k)[top_k_col].tolist()
+            # Filter to only top k values
             df = df[df[top_k_col].isin(top_values)]
+            
+            # Create a sort order mapping to preserve the top_k order
+            sort_order_map = {val: idx for idx, val in enumerate(top_values)}
+            
+            # If we have a series column, maintain sort order by adding a sort key
+            if series_col:
+                # For grouped charts, maintain sort order by adding a sort key
+                df['_top_k_sort'] = df[top_k_col].map(sort_order_map)
+                df = df.sort_values('_top_k_sort')
+                df = df.drop(columns=['_top_k_sort'])
+            else:
+                # For simple bar charts without series, aggregate by top_k_col to ensure one row per value
+                # This handles cases where SQL might return multiple rows per top_k value
+                if len(df.groupby(top_k_col)) > len(top_values):
+                    # Need to aggregate - group by top_k_col and sum y_col
+                    df = df.groupby(top_k_col)[y_col].sum().reset_index()
+                    # Sort by y_col in the specified order
+                    df = df.sort_values(y_col, ascending=(order == "asc"))
+                    # Ensure we only have the top k (should already be filtered, but double-check)
+                    df = df.head(k)
+                else:
+                    # Data is already one row per top_k value, just ensure it's sorted
+                    df['_top_k_sort'] = df[top_k_col].map(sort_order_map)
+                    df = df.sort_values('_top_k_sort')
+                    df = df.drop(columns=['_top_k_sort'])
     
     # Apply limits
     limits = chart.get("limits", {})
@@ -120,7 +148,16 @@ def render_chart_from_spec(df: pd.DataFrame, spec: Dict[str, Any], output_path: 
                 pivot_df.plot(kind='bar', ax=ax, stacked=stacked)
             ax.legend(title=series_col)
         else:
-            # Simple bar chart
+            # Simple bar chart - ensure data is sorted by y_col descending for "top N" queries
+            # If top_k was used, data should already be sorted, but ensure it anyway
+            if top_k_order == "desc":
+                df_plot = df_plot.sort_values(y_col, ascending=False)
+            elif top_k_order == "asc":
+                df_plot = df_plot.sort_values(y_col, ascending=True)
+            elif not x_config.get("sort", False):  # Only auto-sort if not explicitly sorted by x
+                # Default: sort by y_col descending for bar charts (highest first)
+                df_plot = df_plot.sort_values(y_col, ascending=False)
+            
             if orientation == "horizontal":
                 ax.barh(df_plot[x_col], df_plot[y_col])
             else:

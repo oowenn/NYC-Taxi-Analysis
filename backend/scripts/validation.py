@@ -76,9 +76,21 @@ def validate_sql(sql: str, conn: Optional[duckdb.DuckDBPyConnection] = None) -> 
                 sql_lower = sql.lower()
                 for invalid_col in invalid_columns:
                     if invalid_col in sql_lower and invalid_col not in {col.lower() for col in result_columns}:
-                        # Check if it's actually used (not just in a comment)
+                        # Check if it's actually used as a column (not in a type cast like ::timestamp)
+                        # Exclude type casts: ::timestamp, ::date, CAST(... AS timestamp), etc.
                         pattern = rf'\b{invalid_col}\b'
+                        # Don't match if it's part of a type cast (::timestamp, CAST(... AS timestamp))
                         if re.search(pattern, sql_lower):
+                            # Check if it's a type cast - if so, skip this check
+                            cast_patterns = [
+                                rf'::{invalid_col}\b',  # ::timestamp
+                                rf'cast\s*\([^)]+\s+as\s+{invalid_col}\b',  # CAST(... AS timestamp)
+                                rf'as\s+{invalid_col}\s*\)',  # ... AS timestamp)
+                            ]
+                            is_cast = any(re.search(cp, sql_lower, re.IGNORECASE) for cp in cast_patterns)
+                            if is_cast:
+                                continue  # Skip - it's a type cast, not a column
+                            
                             # Suggest correct column
                             if "start" in invalid_col or "pickup" in sql_lower:
                                 errors.append(f"Column '{invalid_col}' not found. Did you mean 'pickup_datetime'?")
