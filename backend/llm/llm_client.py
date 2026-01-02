@@ -9,7 +9,9 @@ import httpx
 
 class LLMClient:
     def __init__(self):
-        self.provider = os.getenv("LLM_PROVIDER", "ollama")
+        # Default to Groq (API) - faster and no local setup needed
+        # Set LLM_PROVIDER=ollama to use local Ollama instead
+        self.provider = os.getenv("LLM_PROVIDER", "groq")
         self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         # Default to llama3; can override with env
         self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3")
@@ -17,6 +19,8 @@ class LLMClient:
         self.timeout = float(os.getenv("LLM_TIMEOUT", "300"))
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        self.groq_key = os.getenv("GROQ_API_KEY")
+        self.groq_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
     
     async def generate_sql(self, query: str, max_attempts: int = 2) -> Optional[Dict[str, Any]]:
         """Generate SQL from natural language query"""
@@ -30,6 +34,8 @@ class LLMClient:
                     response = await self._call_openai(prompt)
                 elif self.provider == "anthropic":
                     response = await self._call_anthropic(prompt)
+                elif self.provider == "groq":
+                    response = await self._call_groq(prompt)
                 else:
                     raise ValueError(f"Unknown provider: {self.provider}")
                 
@@ -148,6 +154,30 @@ Return only the SQL:"""
             response.raise_for_status()
             data = response.json()
             return data["content"][0]["text"]
+    
+    async def _call_groq(self, prompt: str) -> str:
+        """Call Groq API (OpenAI-compatible)"""
+        if not self.groq_key:
+            raise ValueError("GROQ_API_KEY not set")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.groq_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.groq_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens": 2048
+                },
+                timeout=30.0  # Groq is fast, shorter timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
     
     def _parse_response(self, response: str) -> Optional[Dict[str, Any]]:
         """Parse LLM response to extract SQL and chart config"""

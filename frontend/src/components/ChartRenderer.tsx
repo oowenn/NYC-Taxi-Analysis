@@ -68,37 +68,64 @@ export default function ChartRenderer({ config, data }: ChartRendererProps) {
     '#d084d0', '#ffb347', '#87ceeb', '#da70d6', '#98d8c8'
   ]
 
-  const ChartComponent = config.type === 'line' ? LineChart : BarChart
-  const DataComponent = config.type === 'line' ? Line : Bar
-
-  return (
-    <div className="chart-container">
-      {config.title && <h4 className="chart-title">{config.title}</h4>}
-      <ResponsiveContainer width="100%" height={300}>
-        <ChartComponent data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey={config.x} />
-          <YAxis />
-          <Tooltip />
-          {config.series ? (
-            <>
-              <Legend />
-              {seriesValues.map((series, idx) => (
-                <DataComponent
-                  key={series}
-                  type="monotone"
-                  dataKey={series}
-                  stroke={colors[idx % colors.length]}
-                  fill={colors[idx % colors.length]}
-                />
-              ))}
-            </>
-          ) : (
-            <DataComponent type="monotone" dataKey={config.y} fill="#8884d8" />
-          )}
-        </ChartComponent>
-      </ResponsiveContainer>
-    </div>
-  )
+  if (config.type === 'line') {
+    return (
+      <div className="chart-container">
+        {config.title && <h4 className="chart-title">{config.title}</h4>}
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey={config.x} />
+            <YAxis />
+            <Tooltip />
+            {config.series ? (
+              <>
+                <Legend />
+                {seriesValues.map((series, idx) => (
+                  <Line
+                    key={series}
+                    type="monotone"
+                    dataKey={series}
+                    stroke={colors[idx % colors.length]}
+                    fill={colors[idx % colors.length]}
+                  />
+                ))}
+              </>
+            ) : (
+              <Line type="monotone" dataKey={config.y} stroke="#8884d8" />
+            )}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  } else {
+    return (
+      <div className="chart-container">
+        {config.title && <h4 className="chart-title">{config.title}</h4>}
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey={config.x} />
+            <YAxis />
+            <Tooltip />
+            {config.series ? (
+              <>
+                <Legend />
+                {seriesValues.map((series, idx) => (
+                  <Bar
+                    key={series}
+                    dataKey={series}
+                    fill={colors[idx % colors.length]}
+                  />
+                ))}
+              </>
+            ) : (
+              <Bar dataKey={config.y} fill="#8884d8" />
+            )}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
 }
 

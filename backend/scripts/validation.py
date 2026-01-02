@@ -55,7 +55,12 @@ def validate_sql(sql: str, conn: Optional[duckdb.DuckDBPyConnection] = None) -> 
             try:
                 explain_result = conn.execute(f"EXPLAIN {sql}").fetchall()
             except Exception as e:
-                errors.append(f"SQL syntax error: {str(e)}")
+                error_msg = str(e)
+                # Check for common GROUP BY errors
+                if "GROUP BY" in error_msg.upper() or "must appear in the GROUP BY" in error_msg:
+                    errors.append(f"SQL GROUP BY error: {error_msg}")
+                else:
+                    errors.append(f"SQL syntax error: {error_msg}")
                 return (False, errors)
             
             # Try to get column info from a LIMIT 0 query
@@ -181,6 +186,32 @@ def build_sql_correction_prompt(question: str, sql: str, errors: List[str], atte
             prev_errors_text = "; ".join(prev_errors[:3])  # Limit to first 3 errors
             previous_context = f"\n\nNote: In the previous attempt, these errors occurred: {prev_errors_text}\n"
     
+    # Analyze errors to provide specific guidance
+    specific_guidance = ""
+    if any("GROUP BY" in e or "must appear in the GROUP BY" in e for e in errors):
+        specific_guidance = """
+CRITICAL: GROUP BY error detected. Fix this by:
+- If you're using GROUP BY, every column in SELECT must either:
+  * Be in the GROUP BY clause, OR
+  * Be wrapped in an aggregate function (SUM, COUNT, AVG, MAX, MIN, etc.)
+- Example: If calculating percentages by company:
+  WRONG: SELECT company, base_passenger_fare, ... GROUP BY company  (base_passenger_fare not aggregated)
+  CORRECT: SELECT company, SUM(base_passenger_fare) AS total, ROUND(100.0 * SUM(base_passenger_fare) / SUM(SUM(base_passenger_fare)) OVER (), 2) AS percentage FROM ... GROUP BY company
+- When using window functions (OVER()), they can be used alongside GROUP BY in the same SELECT
+"""
+    
+    if any("percentage" in e.lower() or "percent" in e.lower() for e in errors) or any("percentage" in sql.lower() or "percent" in sql.lower() for sql in [sql]):
+        if "GROUP BY" in specific_guidance:
+            # Already covered
+            pass
+        else:
+            specific_guidance += """
+For percentage calculations:
+- Use SUM() to aggregate values before calculating percentages
+- Pattern: SELECT category, SUM(value) AS total, ROUND(100.0 * SUM(value) / SUM(SUM(value)) OVER (), 2) AS percentage FROM table WHERE ... GROUP BY category
+- DO NOT use raw column values in percentage calculations when using GROUP BY - always use SUM() or other aggregates
+"""
+    
     return f"""
 You previously generated this SQL query for the question: "{question}"
 
@@ -189,12 +220,14 @@ SQL (Attempt {attempt}):
 
 However, validation/execution found these errors:
 {errors_text}
+{specific_guidance}
 {previous_context}
 Please correct the SQL query. Remember:
 - Use view fhv_with_company
-- Available columns: pickup_datetime (default time field), dropoff_datetime, company, hvfhs_license_num, trip_miles, trip_time, PULocationID, DOLocationID, pickup_borough, pickup_zone, dropoff_borough, dropoff_zone, base_name
+- Available columns: pickup_datetime (default time field), dropoff_datetime, company, hvfhs_license_num, trip_miles, trip_time, PULocationID, DOLocationID, pickup_borough, pickup_zone, dropoff_borough, dropoff_zone, base_name, base_passenger_fare, tolls, sales_tax, congestion_surcharge, airport_fee, tips, driver_pay
 - Use pickup_datetime for time filters unless the question explicitly asks for another column
 - Include a time filter within 2023-01-01..2023-03-31
+- For time-based aggregations, use DATE_TRUNC('month', pickup_datetime) AS month (or 'day', 'hour') to create a proper date column instead of extracting year and month separately
 - Aggregate-first (GROUP BY); include LIMIT (e.g., 500)
 - When counting trips, use COUNT(*) AS trips
 - Pay close attention to the specific errors listed above and fix them directly

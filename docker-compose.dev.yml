@@ -1,0 +1,76 @@
+# Development docker-compose configuration
+# Usage: docker-compose -f docker-compose.dev.yml up
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nyc-taxi-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Data paths
+      - DATA_DIR=/app/data
+      - TAXI_ZONE_LOOKUP=/app/data/taxi_zone_lookup.csv
+      - BASE_LOOKUP=/app/data/fhv_base_lookup.csv
+      - HVFHS_LOOKUP=/app/data/hvfhs_license_num_lookup.csv
+      - CHART_DIR=/app/charts
+      
+      # LLM Configuration (set these in root .env file)
+      # Default: groq (API) - no local setup needed, just add GROQ_API_KEY
+      # To use Ollama (local): set LLM_PROVIDER=ollama and install Ollama
+      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.1-8b-instant}
+      
+      # Optional: Ollama fallback
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3:latest}
+      
+      # Security
+      - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}
+      - DEBUG=${DEBUG:-false}
+      
+      # CORS (frontend will be accessible via nginx proxy)
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost}
+      
+      # Rate limiting
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-5}
+      - RATE_LIMIT_PER_DAY=${RATE_LIMIT_PER_DAY:-50}
+      - GLOBAL_DAILY_CAP=${GLOBAL_DAILY_CAP:-1000}
+    volumes:
+      # Mount data directory (read-only for data files)
+      - ./data:/app/data:ro
+      # Mount charts directory (read-write for generated charts)
+      - ./charts:/app/charts
+      # Optional: mount .env file (if you prefer file-based config)
+      # - ./backend/.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Set API URL for build (will use /api which proxies to backend)
+        - VITE_API_URL=/api
+    container_name: nyc-taxi-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

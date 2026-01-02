@@ -89,9 +89,33 @@ async def process_query(question: str, duckdb_conn: duckdb.DuckDBPyConnection) -
             "chart": None,
             "mode": "error"
         }
+    except RuntimeError as e:
+        error_msg = str(e)
+        # Check if it's a rate limit error
+        if "rate limit" in error_msg.lower() or "429" in error_msg:
+            return {
+                "answer": "ERROR: Rate Limit Reached\n\nThe LLM API rate limit has been exceeded. Please wait a moment and try again.\n\nGroq free tier limits:\n• 30 requests per minute\n• 7,000 requests per day",
+                "sql": None,
+                "data": None,
+                "data_preview": None,
+                "chart": None,
+                "mode": "error"
+            }
+        # Re-raise to be handled by general exception handler
+        raise
     except Exception as e:
         import traceback
         error_msg = str(e)
+        # Check if it's a rate limit error
+        if "rate limit" in error_msg.lower() or "429" in error_msg or "too many requests" in error_msg.lower():
+            return {
+                "answer": "ERROR: Rate Limit Reached\n\nThe LLM API rate limit has been exceeded. Please wait a moment and try again.\n\nGroq free tier limits:\n• 30 requests per minute\n• 7,000 requests per day",
+                "sql": None,
+                "data": None,
+                "data_preview": None,
+                "chart": None,
+                "mode": "error"
+            }
         # Check if it's a connection error
         if "connection" in error_msg.lower() or "refused" in error_msg.lower() or "connect" in error_msg.lower():
             return {
@@ -190,8 +214,35 @@ Return ONLY valid JSON, no extra text or code fences.
         
         try:
             spec_raw = await call_ollama(spec_prompt, model=model, timeout=timeout)
+        except RuntimeError as e:
+            error_msg = str(e)
+            # Check if it's a rate limit error
+            if "rate limit" in error_msg.lower() or "429" in error_msg:
+                # Rate limit hit - return error immediately, don't retry
+                return {
+                    "answer": "ERROR: Rate Limit Reached\n\nThe LLM API rate limit has been exceeded. Please wait a moment and try again.\n\nGroq free tier limits:\n• 30 requests per minute\n• 7,000 requests per day",
+                    "sql": sql,
+                    "data": rows,
+                    "data_preview": rows[:100],
+                    "chart": None,
+                    "mode": "error"
+                }
+            # Re-raise other RuntimeErrors
+            raise
         except Exception as e:
             print(f"LLM call failed: {e}")
+            error_msg = str(e)
+            # Check if it's a rate limit error
+            if "rate limit" in error_msg.lower() or "429" in error_msg or "too many requests" in error_msg.lower():
+                # Rate limit hit - return error immediately
+                return {
+                    "answer": "ERROR: Rate Limit Reached\n\nThe LLM API rate limit has been exceeded. Please wait a moment and try again.\n\nGroq free tier limits:\n• 30 requests per minute\n• 7,000 requests per day",
+                    "sql": sql,
+                    "data": rows,
+                    "data_preview": rows[:100],
+                    "chart": None,
+                    "mode": "error"
+                }
             if attempt == max_spec_attempts:
                 break
             last_error = f"LLM call failed: {str(e)}"
@@ -276,7 +327,8 @@ Return ONLY valid JSON, no extra text or code fences.
             # Use a more accessible path - store in backend/static/charts or /tmp
             import tempfile
             import uuid
-            chart_dir = Path("/tmp") / "nyc_taxi_charts"
+            # Use configurable chart directory (default to /tmp for local dev)
+            chart_dir = Path(os.getenv("CHART_DIR", "/tmp/nyc_taxi_charts"))
             try:
                 chart_dir.mkdir(exist_ok=True, parents=True)
             except Exception as e:

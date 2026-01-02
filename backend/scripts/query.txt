@@ -1,0 +1,4 @@
+Top 10 pickup zones
+What is the percentage of base passenger fares held by each company?
+Show hourly trips by company for the first 3 days of January 2023.
+What do the trip miles by company over time look like?

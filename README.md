@@ -4,87 +4,136 @@ LLM-powered chatbot for querying NYC TLC FHVHV (For-Hire Vehicle High Volume) da
 
 ## Features
 
-- 🤖 Natural language to SQL generation using LLMs (Ollama)
+- 🤖 Natural language to SQL generation using LLMs (Groq API - default, or Ollama local)
 - 📊 Structured chart specification generation (JSON specs instead of Python code)
 - 🎯 Agent-style validation with automatic error correction and retry logic
 - ⚡ Fast queries using DuckDB on Parquet files
 - 📈 Reliable chart rendering from structured specifications
 - 🌐 Web interface for interactive querying
 
-## Quick Start
+## Quick Start (Docker - Recommended)
 
 ### Prerequisites
 
-- Python 3.10+
-- Node.js 18+
-- Ollama installed and running
+- **Docker** and **Docker Compose** installed
+- **Groq API key** (get from https://console.groq.com/)
 - Data files in `data/` directory
 
 ### Setup
 
-1. **Install dependencies:**
+1. **Get your Groq API key:**
+   - Sign up at https://console.groq.com/
+   - Navigate to API Keys
+   - Create a new API key
+
+2. **Create `.env` file in project root:**
    ```bash
-   make setup
-   # Or manually:
-   # Backend: cd backend && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt
-   # Frontend: cd frontend && npm install
+   cat > .env << EOF
+   LLM_PROVIDER=groq
+   GROQ_API_KEY=your_groq_api_key_here
+   TURNSTILE_SECRET_KEY=1x00000000000000000000AA
+   EOF
    ```
 
-2. **Start Ollama and pull model:**
-   ```bash
-   ollama serve  # In a separate terminal
-   ollama pull llama3:latest
-   ```
-
-3. **Prepare data:**
+3. **Prepare data files:**
    
    **Download trip data from NYC TLC:**
    - Download `fhvhv_tripdata_2023-*.parquet` files from the [NYC TLC Trip Record Data page](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page)
    - Look for "High Volume For-Hire Vehicle Trip Records" under the 2023 section
    - Place the downloaded Parquet files in the `data/` directory
    
-   **Lookup files:**
-   - `taxi_zone_lookup.csv` - Available from the NYC TLC website (Taxi Zone Lookup Table), but also included in `data/`
-   - `fhv_base_lookup.csv` - Created for this project, included in `data/`
-   - `hvfhs_license_num_lookup.csv` - Created for this project, included in `data/`
-   
-   All lookup files should be placed in the `data/` directory.
+   **Lookup files (already included in `data/`):**
+   - `taxi_zone_lookup.csv` - From NYC TLC website
+   - `fhv_base_lookup.csv` - Project-created
+   - `hvfhs_license_num_lookup.csv` - Project-created
 
-4. **Configure environment:**
-   ```bash
-   cp .env.example backend/.env
-   # Edit backend/.env if needed (defaults should work for local dev)
-   ```
+### Running with Docker
 
-### Running the Server
-
-**Start backend (Terminal 1):**
+**Start production services (default):**
 ```bash
-make backend-dev
-# Or manually:
-# cd backend && source venv/bin/activate && USE_LLM_PIPELINE=true uvicorn main:app --reload --port 8000
+docker-compose up --build
 ```
 
-**Start frontend (Terminal 2):**
+**Or using Makefile:**
 ```bash
-make frontend-dev
-# Or manually:
-# cd frontend && npm run dev
+make docker-up
+```
+
+**For development (with bind mounts and permissive settings):**
+```bash
+docker-compose -f docker-compose.dev.yml up
+# Or: make docker-dev-up
 ```
 
 The application will be available at:
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+- **Frontend:** http://localhost (port 80)
+- **Backend API:** http://localhost:8000
+- **API Docs:** http://localhost:8000/docs
 
 ### Usage
 
-1. Open http://localhost:5173 in your browser
+1. Open http://localhost in your browser
 2. Ask questions about the NYC Uber/Lyft data, for example:
    - "What are the top 10 pickup zones?"
    - "Show hourly trips by company for the first 3 days of January 2023"
    - "What is the percentage of base passenger fares held by each company?"
 3. View the generated SQL, data table, and visualization
+
+**Note:** The system uses **Groq API** by default (no local LLM installation needed). See [LLM_SETUP.md](LLM_SETUP.md) for configuration details.
+
+## Local Development (Alternative)
+
+### Prerequisites
+
+- Python 3.10+
+- Node.js 18+
+- **Groq API key** (recommended) OR Ollama installed and running
+
+### Setup
+
+1. **Install dependencies:**
+   ```bash
+   make setup
+   ```
+
+2. **Configure LLM:**
+   
+   **Groq API (Recommended):**
+   ```bash
+   cat > backend/.env << EOF
+   LLM_PROVIDER=groq
+   GROQ_API_KEY=your_groq_api_key_here
+   TURNSTILE_SECRET_KEY=1x00000000000000000000AA
+   EOF
+   ```
+   
+   **Ollama (Local):**
+   ```bash
+   # Install Ollama: https://ollama.ai/
+   ollama serve  # In a separate terminal
+   ollama pull llama3:latest
+   cat > backend/.env << EOF
+   LLM_PROVIDER=ollama
+   OLLAMA_MODEL=llama3:latest
+   TURNSTILE_SECRET_KEY=1x00000000000000000000AA
+   EOF
+   ```
+
+### Running Locally
+
+**Start backend (Terminal 1):**
+```bash
+make backend-dev
+```
+
+**Start frontend (Terminal 2):**
+```bash
+make frontend-dev
+```
+
+The application will be available at:
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8000
 
 ## Testing the LLM Pipeline
 
@@ -99,7 +148,7 @@ The main test script (`backend/scripts/test_llm_pipeline.py`) implements the ful
 ### Prerequisites
 
 - Python 3.10+
-- Ollama installed and running
+- **Groq API key** (recommended) OR Ollama installed and running
 - Data files in `data/` directory
 
 ### Setup
@@ -112,25 +161,21 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-2. **Start Ollama and pull model:**
-```bash
-ollama serve  # In a separate terminal
-ollama pull llama3
-```
+2. **Configure LLM:**
 
-3. **Prepare data:**
+   **Groq API (Recommended - Default):**
+   ```bash
+   export GROQ_API_KEY=your_groq_api_key_here
+   export LLM_PROVIDER=groq
+   ```
    
-   **Download trip data from NYC TLC:**
-   - Download `fhvhv_tripdata_2023-*.parquet` files from the [NYC TLC Trip Record Data page](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page)
-   - Look for "High Volume For-Hire Vehicle Trip Records" under the 2023 section
-   - Place the downloaded Parquet files in the `data/` directory
-   
-   **Lookup files:**
-   - `taxi_zone_lookup.csv` - Available from the NYC TLC website (Taxi Zone Lookup Table), but also included in `data/`
-   - `fhv_base_lookup.csv` - Created for this project, included in `data/`
-   - `hvfhs_license_num_lookup.csv` - Created for this project, included in `data/`
-   
-   All lookup files should be placed in the `data/` directory.
+   **Ollama (Local):**
+   ```bash
+   ollama serve  # In a separate terminal
+   ollama pull llama3:latest
+   export LLM_PROVIDER=ollama
+   export OLLAMA_MODEL=llama3:latest
+   ```
 
 ### Running Tests
 
@@ -138,12 +183,17 @@ ollama pull llama3
 ```bash
 cd backend
 source venv/bin/activate
-PYTHONPATH=. OLLAMA_MODEL=llama3 python scripts/test_llm_pipeline.py
+PYTHONPATH=. python scripts/test_llm_pipeline.py
 ```
 
-**Test SQL generation only:**
+**With Groq (default):**
 ```bash
-PYTHONPATH=. OLLAMA_MODEL=llama3 python scripts/test_sql_generation.py
+PYTHONPATH=. GROQ_API_KEY=your_key python scripts/test_llm_pipeline.py
+```
+
+**With Ollama:**
+```bash
+PYTHONPATH=. LLM_PROVIDER=ollama OLLAMA_MODEL=llama3:latest python scripts/test_llm_pipeline.py
 ```
 
 **Using Makefile:**
@@ -153,11 +203,59 @@ make test-llm-pipeline
 
 ### Environment Variables
 
-- `OLLAMA_MODEL`: Model to use (default: `llama3`)
+**For Groq API (Default - Recommended):**
+- `LLM_PROVIDER`: Set to `groq` (default)
+- `GROQ_API_KEY`: Your Groq API key (get from https://console.groq.com/keys) - **Required**
+- `GROQ_MODEL`: Model to use (default: `llama-3.1-8b-instant`)
+
+**For Ollama (local):**
+- `LLM_PROVIDER`: Set to `ollama`
+- `OLLAMA_MODEL`: Model to use (default: `llama3:latest`)
 - `OLLAMA_BASE_URL`: Ollama server URL (default: `http://127.0.0.1:11434`)
-- `LLM_TIMEOUT`: Timeout in seconds (default: `180`)
+
+**General:**
+- `LLM_TIMEOUT`: Timeout in seconds (default: `300` for Ollama, `30` for Groq)
 - `MAX_SQL_ATTEMPTS`: Max retries for SQL generation (default: `3`)
 - `MAX_SPEC_ATTEMPTS`: Max retries for chart spec generation (default: `3`)
+
+**Note:** Groq free tier provides 30 requests/minute and 7,000 requests/day, which is sufficient for prototyping and demos. For production, consider upgrading to Developer plan or using Ollama on a VPS.
+
+## Docker Commands
+
+**Start services:**
+```bash
+docker-compose up
+# Or: make docker-up
+```
+
+**Stop services:**
+```bash
+docker-compose down
+# Or: make docker-down
+```
+
+**View logs:**
+```bash
+docker-compose logs -f
+# Or: make docker-logs
+```
+
+**Rebuild after code changes:**
+```bash
+docker-compose up --build
+```
+
+**Production is now the default:**
+```bash
+docker-compose up -d --build
+```
+
+**For development (bind mounts, permissive settings):**
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
+
+See [DOCKER.md](DOCKER.md) for detailed Docker documentation and [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment guide.
 
 ### Output
 
@@ -185,12 +283,25 @@ The test script will:
 │   │   ├── test_sql_generation.py  # SQL generation test
 │   │   ├── validation.py           # Validation tools
 │   │   └── chart_renderer.py       # Chart renderer from specs
+│   ├── services/
+│   │   └── llm_pipeline.py         # LLM pipeline service
 │   ├── db/
 │   │   └── duckdb_setup.py         # DuckDB initialization
 │   └── requirements.txt
+├── frontend/
+│   └── src/                        # React frontend
 ├── data/                           # Parquet files (gitignored)
+├── docker-compose.yml              # Docker Compose config
+├── .env                            # Environment variables (for Docker)
 └── Makefile                        # Development commands
 ```
+
+## Additional Documentation
+
+- **[LLM_SETUP.md](LLM_SETUP.md)** - Detailed LLM configuration guide (Groq vs Ollama)
+- **[DOCKER.md](DOCKER.md)** - Docker setup and usage
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Production deployment guide
+- **[ENV_FILES_EXPLAINED.md](ENV_FILES_EXPLAINED.md)** - Environment file locations explained
 
 ## License
 

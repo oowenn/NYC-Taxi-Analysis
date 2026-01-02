@@ -113,8 +113,81 @@ def render_chart_from_spec(df: pd.DataFrame, spec: Dict[str, Any], output_path: 
     
     # Handle x-axis data type and sorting
     x_dtype = x_config.get("dtype", "number")
+    
+    # Special handling: if we have separate year and month columns, combine them
     if x_dtype == "datetime" and x_col in df_plot.columns:
-        df_plot[x_col] = pd.to_datetime(df_plot[x_col])
+        # Check if we have separate year and month columns that should be combined
+        if "year" in df_plot.columns and "month" in df_plot.columns and x_col in ["year", "month"]:
+            # Create a proper date column from year and month
+            df_plot["_date"] = pd.to_datetime(
+                df_plot["year"].astype(str) + "-" + df_plot["month"].astype(str).str.zfill(2) + "-01"
+            )
+            x_col = "_date"
+        else:
+            # Check the actual data type and format
+            original_dtype = df_plot[x_col].dtype
+            sample_value = df_plot[x_col].iloc[0] if len(df_plot) > 0 else None
+            
+            # If it's already a datetime type, verify it's not 1970 dates
+            if pd.api.types.is_datetime64_any_dtype(df_plot[x_col]):
+                # Check if dates are suspiciously old (before 2000)
+                if len(df_plot) > 0 and df_plot[x_col].min() < pd.Timestamp('2000-01-01'):
+                    # These are likely misinterpreted dates, try to fix
+                    pass  # Will fall through to fix below
+                else:
+                    pass  # Already datetime and looks correct
+            # If it's a string that looks like a date, parse it
+            elif original_dtype == 'object' or isinstance(sample_value, str):
+                # Try parsing as date string first - DuckDB often returns dates as strings
+                df_plot[x_col] = pd.to_datetime(df_plot[x_col], errors='coerce', format='mixed')
+                # If that produced 1970 dates, the strings might be numeric representations
+                if len(df_plot) > 0 and df_plot[x_col].min() < pd.Timestamp('2000-01-01'):
+                    # Try converting string to int first, then parsing
+                    try:
+                        numeric_vals = pd.to_numeric(df_plot[x_col].astype(str), errors='coerce')
+                        # If they're reasonable date numbers (like 20230101 for 2023-01-01)
+                        if numeric_vals.min() > 20000000 and numeric_vals.max() < 21000000:
+                            df_plot[x_col] = pd.to_datetime(numeric_vals.astype(str), format='%Y%m%d', errors='coerce')
+                    except:
+                        pass
+            # If it's numeric, check if it's a reasonable date range
+            elif original_dtype in ['int64', 'float64', 'int32', 'float32']:
+                # Check if values are in a reasonable date range (not Unix timestamps)
+                min_val = df_plot[x_col].min()
+                max_val = df_plot[x_col].max()
+                
+                # If values are very large (likely Unix timestamp in seconds or milliseconds)
+                if min_val > 1000000000:  # After 2001-09-09 (Unix timestamp)
+                    # Could be Unix timestamp - but DuckDB DATE_TRUNC shouldn't return this
+                    # Try parsing as date string first, then as timestamp
+                    df_plot[x_col] = pd.to_datetime(df_plot[x_col], unit='s', errors='coerce')
+                    # If that fails or produces 1970 dates, try as days since epoch
+                    if df_plot[x_col].min() < pd.Timestamp('2000-01-01'):
+                        df_plot[x_col] = pd.to_datetime(df_plot[x_col], unit='D', origin='unix', errors='coerce')
+                # If values are small numbers (like days since some date), might be days since epoch
+                elif min_val > 0 and max_val < 100000:
+                    # Could be days since epoch - try that
+                    df_plot[x_col] = pd.to_datetime(df_plot[x_col], unit='D', origin='unix', errors='coerce')
+                # Otherwise, try standard parsing
+                else:
+                    df_plot[x_col] = pd.to_datetime(df_plot[x_col], errors='coerce')
+                
+                # If conversion failed or produced 1970 dates, try string conversion
+                if df_plot[x_col].isna().any() or df_plot[x_col].min() < pd.Timestamp('2000-01-01'):
+                    # Try converting to string first, then parsing
+                    df_plot[x_col] = pd.to_datetime(df_plot[x_col].astype(str), errors='coerce', format='mixed')
+            else:
+                # Default: try to parse as datetime
+                df_plot[x_col] = pd.to_datetime(df_plot[x_col], errors='coerce', format='mixed')
+            
+            # Final check: if we still have 1970 dates or failed conversions, check for year/month columns
+            if df_plot[x_col].isna().any() or (df_plot[x_col].min() < pd.Timestamp('2000-01-01') and "year" in df_plot.columns):
+                if "year" in df_plot.columns and "month" in df_plot.columns:
+                    # Fallback: combine year and month
+                    df_plot["_date"] = pd.to_datetime(
+                        df_plot["year"].astype(str) + "-" + df_plot["month"].astype(str).str.zfill(2) + "-01"
+                    )
+                    x_col = "_date"
     elif x_dtype == "number" and x_col in df_plot.columns:
         df_plot[x_col] = pd.to_numeric(df_plot[x_col], errors='coerce')
     
@@ -225,7 +298,25 @@ def render_chart_from_spec(df: pd.DataFrame, spec: Dict[str, Any], output_path: 
     
     # Format x-axis
     if x_dtype == "datetime":
-        ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d %H:%M'))
+        # Use appropriate date format based on data range
+        if pd.api.types.is_datetime64_any_dtype(df_plot[x_col]):
+            date_min = df_plot[x_col].min()
+            date_max = df_plot[x_col].max()
+            date_range = (date_max - date_min).days if pd.notna(date_max) and pd.notna(date_min) else 0
+            
+            # Choose format based on time span
+            if date_range > 365:
+                # Years/months - show year-month
+                ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m'))
+            elif date_range > 30:
+                # Months/days - show month-day
+                ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d'))
+            else:
+                # Days/hours - show full datetime
+                ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d %H:%M'))
+        else:
+            # Fallback format
+            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d'))
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
     elif x_config.get("dtype") == "category":
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')

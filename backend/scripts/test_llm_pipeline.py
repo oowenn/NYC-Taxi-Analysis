@@ -66,11 +66,18 @@ You are a SQL planner for NYC FHVHV data.
 User question: {question}
 Rules:
 - Use view fhv_with_company.
-- Columns include: pickup_datetime (default time field), dropoff_datetime, company, hvfhs_license_num, trip_miles, trip_time, PULocationID, DOLocationID, pickup_borough, pickup_zone, dropoff_borough, dropoff_zone, base_name.
+- Available columns: pickup_datetime (default time field), dropoff_datetime, company, hvfhs_license_num, trip_miles, trip_time, PULocationID, DOLocationID, pickup_borough, pickup_zone, dropoff_borough, dropoff_zone, base_name, base_passenger_fare, tolls, bcf, sales_tax, congestion_surcharge, airport_fee, tips, driver_pay, request_datetime, on_scene_datetime, dispatching_base_num, originating_base_num, shared_request_flag, shared_match_flag, access_a_ride_flag, wav_request_flag, wav_match_flag.
 - Include a time filter within 2023-01-01..2023-03-31; if none specified, default to 2023-01-01..2023-01-03.
 - Use pickup_datetime for time filters unless the question explicitly asks for another column.
+- For time-based aggregations (grouping by time periods), create a proper date column:
+  * Use DATE_TRUNC('month', pickup_datetime) AS month for monthly grouping
+  * Use DATE_TRUNC('day', pickup_datetime) AS date for daily grouping
+  * Use DATE_TRUNC('hour', pickup_datetime) AS hour for hourly grouping
+  * Avoid extracting year and month separately - use DATE_TRUNC to create a single date column
+- When using GROUP BY, all non-aggregated columns in SELECT must appear in GROUP BY, or use aggregate functions (SUM, COUNT, AVG, etc.).
 - Aggregate-first (GROUP BY); include LIMIT (e.g., 500).
 - When counting trips, use COUNT(*) AS trips (or similar aggregate aliases).
+- Include ORDER BY when appropriate (DESC for rankings, ASC for time series).
 - Output only the SQL string, no extra text or code fences; single-line or with \\n escapes is fine.
 """.strip()
 
@@ -213,9 +220,23 @@ Chart specification schema:
 Rules:
 - Use column names exactly as they appear in the data
 - For time-based data, use "datetime" dtype for x-axis
+- IMPORTANT - Time axis handling:
+  * If the data has separate "year" and "month" columns, you MUST combine them into a single date column for the x-axis
+  * Use a column name like "date" or "period" that represents the combined year-month
+  * If you see year and month columns, the x-axis should reference a combined date, not just "year"
+  * Example: If data has "year"=2023, "month"=1, create x-axis as a date representing "2023-01"
+  * For time series over months, the x-axis should be a proper date column, not just year numbers
 - For categorical data, use "category" dtype
 - Set "series" to a column name if you want to group/compare multiple series (e.g., by company)
 - Use "top_k" to limit to top N items if the dataset is large
+- IMPORTANT - Sorting (CRITICAL for "top N" queries):
+  * For "top N" queries (e.g., "top 10 pickup zones"), you MUST use "top_k" with order "desc" to sort by the metric value
+  * Example for "top 10 pickup zones by trips": use top_k={{col: "pickup_zone", k: 10, by: "trips", order: "desc"}}
+  * For bar charts showing comparisons or rankings, ALWAYS sort by the y-axis value in descending order
+  * For time series (line charts), sort by time (x-axis) in ascending order
+  * Set x-axis "sort": true for time-based or when you want ascending order
+  * Set y-axis "sort": false (sorting is handled by x-axis or top_k)
+  * REMEMBER: For "top N" queries, the chart MUST be sorted descending by the metric (y-axis) to show highest values first
 - Choose chart type that best answers the question:
   * "bar" for comparisons
   * "line" for trends over time
@@ -232,6 +253,42 @@ Return ONLY valid JSON, no extra text or code fences.
 
 
 async def call_ollama(prompt: str, model: str, timeout: float) -> str:
+    """Call Ollama or Groq API based on environment variables"""
+    provider = os.getenv("LLM_PROVIDER", "ollama")
+    
+    if provider == "groq":
+        groq_key = os.getenv("GROQ_API_KEY")
+        if not groq_key:
+            raise ValueError("GROQ_API_KEY not set. Get your API key from https://console.groq.com/keys")
+        
+        groq_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": groq_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1,
+                        "max_tokens": 2048
+                    },
+                    timeout=min(timeout, 30.0),  # Groq is fast
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:
+                    raise RuntimeError(f"Groq rate limit exceeded. Free tier: 30 RPM, 7K RPD. Check headers for retry-after.") from e
+                raise RuntimeError(f"Groq API error {e.response.status_code}: {e.response.text}") from e
+            except httpx.TimeoutException as e:
+                raise TimeoutError(f"Groq request timed out after {timeout}s") from e
+    
+    # Default to Ollama
     base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     url = base_url + "/api/chat"
     async with httpx.AsyncClient() as client:
@@ -254,7 +311,15 @@ async def call_ollama(prompt: str, model: str, timeout: float) -> str:
 
 async def generate_sql_with_validation(question: str, model: str, timeout: float, max_attempts: int = 3, verbose: bool = True) -> Optional[str]:
     """Generate SQL with validation and retry logic"""
-    conn = init_duckdb()
+    try:
+        conn = init_duckdb()
+    except Exception as e:
+        if verbose:
+            print(f"\n❌ Failed to initialize DuckDB: {e}")
+            import traceback
+            traceback.print_exc()
+        raise RuntimeError(f"Failed to initialize DuckDB: {e}") from e
+    
     sql = None
     errors = []
     last_attempt = None  # Only track the last attempt, not all previous attempts

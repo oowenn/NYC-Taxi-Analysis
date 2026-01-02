@@ -1,13 +1,19 @@
 import { useState, useRef, useEffect } from 'react'
 import { Turnstile } from '@marsidev/react-turnstile'
 import MessageList from './MessageList'
-import ChartRenderer from './ChartRenderer'
 import { sendMessage } from '../api/chat'
-import type { ChatResponse } from '../types'
 import './ChatInterface.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || ''
+
+const getApiPath = (endpoint: string) => {
+  if (API_URL.startsWith('/')) {
+    return `${API_URL}${endpoint}`
+  } else {
+    return `${API_URL}/api${endpoint}`
+  }
+}
 // Detect dev mode: localhost, 127.0.0.1, or /api (Vite proxy)
 const isDevMode = API_URL.includes('localhost') || API_URL.includes('127.0.0.1') || API_URL === '/api'
 
@@ -17,7 +23,9 @@ interface Message {
   content: string
   sql?: string
   data?: any[]
+  data_preview?: any[]
   chart?: any
+  chart_image_url?: string
   sources?: string[]
   mode?: string
   cached?: boolean
@@ -26,14 +34,41 @@ interface Message {
 type LoadingStage = 'idle' | 'generating-sql' | 'fetching-data' | 'generating-visualization'
 
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([])
+  // Initialize with welcome message from assistant
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      content: 'Welcome! 👋\n\nTry asking:\n• "Top 10 pickup zones"\n• "What is the percentage of base passenger fares held by each company?"\n• "Show hourly trips by company for the first 3 days of January 2023"\n• "What do the trip miles by company over time look like?"'
+    }
+  ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingStage, setLoadingStage] = useState<LoadingStage>('idle')
   const [turnstileToken, setTurnstileToken] = useState<string>('')
   const [error, setError] = useState<string>('')
+  const [previewData, setPreviewData] = useState<any>(null)
+  const [previewLoading, setPreviewLoading] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const stageTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const stageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Fetch preview data on mount
+  useEffect(() => {
+    const fetchPreview = async () => {
+      try {
+        const response = await fetch(getApiPath('/data-preview'))
+        if (response.ok) {
+          const data = await response.json()
+          setPreviewData(data)
+        }
+      } catch (err) {
+        // Silently fail - preview is optional
+      } finally {
+        setPreviewLoading(false)
+      }
+    }
+    fetchPreview()
+  }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -122,6 +157,8 @@ export default function ChatInterface() {
         loading={loading}
         loadingStage={loadingStage}
         onShowSQL={(message) => console.log('SQL:', message.sql)}
+        previewData={previewData}
+        previewLoading={previewLoading}
       />
       
       {error && <div className="error-message">{error}</div>}

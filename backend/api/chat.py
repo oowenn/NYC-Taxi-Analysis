@@ -117,7 +117,9 @@ async def chat(request: Request, chat_req: ChatRequest):
         print(f"{'='*80}\n")
         
         # Provide more helpful error messages based on error type
-        if "ImportError" in error_type or "ModuleNotFoundError" in error_type:
+        if "rate limit" in error_detail.lower() or "429" in error_detail or "too many requests" in error_detail.lower():
+            error_detail = "ERROR: Rate Limit Reached\n\nThe LLM API rate limit has been exceeded. Please wait a moment and try again.\n\nGroq free tier limits:\n• 30 requests per minute\n• 7,000 requests per day"
+        elif "ImportError" in error_type or "ModuleNotFoundError" in error_type:
             error_detail = f"Import error: {error_detail}. Check that all dependencies are installed."
         elif "Ollama" in error_detail or "connection" in error_detail.lower() or "ConnectionError" in error_type:
             error_detail = f"{error_detail}. Make sure Ollama is running: `ollama serve`"
@@ -140,15 +142,22 @@ async def chat(request: Request, chat_req: ChatRequest):
 @router.get("/chart-image")
 async def get_chart_image(path: str):
     """Serve chart image files"""
+    from pathlib import Path
+    
     if not path:
         raise HTTPException(status_code=400, detail="Path parameter required")
     
+    # Get chart directory from environment (default to /tmp for backward compatibility)
+    chart_dir = Path(os.getenv("CHART_DIR", "/tmp/nyc_taxi_charts"))
+    chart_dir = chart_dir.resolve()  # Resolve to absolute path
+    
     # Security: ensure path is within allowed directory
-    if not path.startswith("/tmp/nyc_taxi_charts/"):
+    chart_path = Path(path).resolve()
+    if not str(chart_path).startswith(str(chart_dir)):
         raise HTTPException(status_code=403, detail="Invalid path")
     
-    if not os.path.exists(path):
+    if not chart_path.exists():
         raise HTTPException(status_code=404, detail="Chart image not found")
     
-    return FileResponse(path, media_type="image/png")
+    return FileResponse(str(chart_path), media_type="image/png")
 

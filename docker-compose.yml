@@ -1,0 +1,88 @@
+# Production docker-compose configuration (default)
+# Usage: docker-compose up -d
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nyc-taxi-backend-prod
+    ports:
+      - "8000:8000"
+    environment:
+      # Data paths
+      - DATA_DIR=/app/data
+      - TAXI_ZONE_LOOKUP=/app/data/taxi_zone_lookup.csv
+      - BASE_LOOKUP=/app/data/fhv_base_lookup.csv
+      - HVFHS_LOOKUP=/app/data/hvfhs_license_num_lookup.csv
+      - CHART_DIR=/app/charts
+      
+      # LLM Configuration (MUST be set via environment or secrets)
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.1-8b-instant}
+      
+      # Security (MUST be set)
+      - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}
+      - DEBUG=false
+      
+      # CORS (set to your production domain)
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      
+      # Rate limiting (stricter for production)
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-10}
+      - RATE_LIMIT_PER_DAY=${RATE_LIMIT_PER_DAY:-100}
+      - GLOBAL_DAILY_CAP=${GLOBAL_DAILY_CAP:-2000}
+    volumes:
+      - ./data:/app/data:ro
+      - charts_prod:/app/charts
+    restart: always
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Resource limits for production
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-/api}
+    container_name: nyc-taxi-frontend-prod
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Resource limits for production
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  charts_prod:
+    driver: local
+

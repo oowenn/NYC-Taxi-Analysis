@@ -1,4 +1,4 @@
-.PHONY: help backend-dev frontend-dev build-backend build-frontend setup install test clean test-llm-pipeline
+.PHONY: help backend-dev frontend-dev build-backend build-frontend setup install test clean test-llm-pipeline docker-build docker-up docker-down docker-logs docker-prod-up docker-prod-down docker-clean
 
 help:
 	@echo "NYC Ridehail Analytics Chatbot - Development Commands"
@@ -16,9 +16,12 @@ help:
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-build   - Build all Docker images"
-	@echo "  make docker-up      - Start services with Docker Compose"
+	@echo "  make docker-up      - Start production services (default)"
 	@echo "  make docker-down    - Stop Docker Compose services"
 	@echo "  make docker-logs    - View Docker Compose logs"
+	@echo "  make docker-dev-up  - Start development services"
+	@echo "  make docker-dev-down - Stop development services"
+	@echo "  make docker-clean   - Remove containers, volumes, and images"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test           - Run tests"
@@ -52,6 +55,38 @@ test-llm-pipeline:
 	@echo "Testing LLM pipeline..."
 	cd backend && source venv/bin/activate && PYTHONPATH=. python scripts/test_llm_pipeline.py
 
+docker-build:
+	@echo "Building Docker images..."
+	docker-compose build
+
+docker-up:
+	@echo "Starting Docker Compose services (production)..."
+	docker-compose up -d --build
+	@echo "Production services started. Frontend: http://localhost, Backend: http://localhost:8000"
+
+docker-down:
+	@echo "Stopping Docker Compose services..."
+	docker-compose down
+
+docker-logs:
+	docker-compose logs -f
+
+docker-dev-up:
+	@echo "Starting development Docker Compose services..."
+	docker-compose -f docker-compose.dev.yml up -d
+	@echo "Development services started. Frontend: http://localhost, Backend: http://localhost:8000"
+
+docker-dev-down:
+	@echo "Stopping development Docker Compose services..."
+	docker-compose -f docker-compose.dev.yml down
+
+docker-clean:
+	@echo "Cleaning Docker resources..."
+	docker-compose down -v
+	docker-compose -f docker-compose.dev.yml down -v
+	@echo "Removing unused images..."
+	docker image prune -f
+
 clean:
 	find . -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
@@ -59,5 +94,6 @@ clean:
 	rm -rf frontend/node_modules/.cache
 	rm -rf frontend/dist
 	rm -rf /tmp/nyc_taxi_charts
+	rm -rf charts/*.png
 	rm -f backend/scripts/llm_chart.png
 
